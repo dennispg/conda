@@ -1099,10 +1099,10 @@ class ShellWrapperUnitTests(TestCase):
             new_path = activator.pathsep_join(activator._remove_prefix_from_path(self.prefix))
             assert deactivate_data == dals("""
             . "%(deactivate1)s"
-            Remove-Item Env:/CONDA_DEFAULT_ENV
-            Remove-Item Env:/CONDA_PREFIX
-            Remove-Item Env:/CONDA_PROMPT_MODIFIER
-            Remove-Item Env:/CONDA_PYTHON_EXE
+            "CONDA_DEFAULT_ENV" | %%{ if (Test-Path Env:/$_) { Remove-Item Env:/$_ } }
+            "CONDA_PREFIX" | %%{ if (Test-Path Env:/$_) { Remove-Item Env:/$_ } }
+            "CONDA_PROMPT_MODIFIER" | %%{ if (Test-Path Env:/$_) { Remove-Item Env:/$_ } }
+            "CONDA_PYTHON_EXE" | %%{ if (Test-Path Env:/$_) { Remove-Item Env:/$_ } }
             $env:CONDA_SHLVL = "0"
             $env:PATH = "%(new_path)s"
             """) % {
