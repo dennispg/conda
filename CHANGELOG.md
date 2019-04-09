@@ -1,3 +1,85 @@
+## 4.6.11 (2019-04-04)
+
+### Bug fixes
+
+* Remove sys.prefix from front of PATH in basic_posix (#8491)
+* add import to fix conda.core.index.get_index (#8495)
+
+### Docs improvements
+
+* Changelogs for 4.6.10
+
+### Contributors
+
+* @jjhelmus
+* @mingwandroid
+* @msarahan
+
+
+## 4.6.10 (2019-04-01)
+
+### Bug fixes
+
+* Fix python-3 only FileNotFoundError usage in initialize.py  (#8470)
+* Fix more JSON encode errors for the _Null data type (#8471)
+* Fix non-posix-compliant == in conda.sh (#8475, #8476)
+* improve detection of pip dependency in environment.yml files to avoid warning message (#8478)
+* fix condabin\conda.bat use of dp0, making PATH additions incorrect (#8480)
+* init_fish_user: don't assume config file exists  (#8481)
+* Fix for chcp output ending with . (#8484)
+
+### Docs improvements
+
+* Changelogs for 4.6.8, 4.6.9
+
+### Contributors
+
+* @duncanmmacleod
+* @nehaljwani
+* @ilango100
+* @jjhelmus
+* @mingwandroid
+* @msarahan
+* @rrigdon
+
+
+## 4.6.9 (2019-03-29)
+
+### Improvements
+
+* Improve CI for docs commits (#8387, #8401, #8417)
+* Implement `conda init --reverse` to undo rc file and registry changes (#8400)
+* Improve handling of unicode systems  (#8342, #8435)
+* Force the "COMSPEC"  environment variable to always point to cmd.exe on windows.  This was an implicit assumption that was not always true.  (#8457, #8461)
+
+### Bug fixes
+
+* Add central C:/ProgramData/conda as a search path on Windows  (#8272)
+* remove direct use of ruamel_yaml (prefer internal abstraction, yaml_load)  (#8392)
+* Fix/improve `conda init` support for fish shell (#8437)
+* Improve solver behavior in the presence of inconsistent environments (such as pip as a conda dependency of python, but also installed via pip itself) (#8444)
+* Handle read-only filesystems for environments.txt (#8451, #8453)
+* Fix conda env commands involving pip-installed dependencies being installed into incorrect locations  (#8435)
+
+### Docs improvements
+
+* updated cheatsheet  (#8402)
+* updated color theme  (#8403)
+
+### Contributors
+
+* @blackgear
+* @dhirschfeld
+* @jakirkham
+* @jjhelmus
+* @katietz
+* @mingwandroid
+* @msarahan
+* @nehaljwani
+* @rrigdon
+* @soapy1
+* @spamlrot-tic
+
 ## 4.6.8 (2019-03-06)
 
 ### Bug fixes

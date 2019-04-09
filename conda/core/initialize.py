@@ -41,15 +41,20 @@ from os.path import abspath, basename, dirname, exists, expanduser, isdir, isfil
 from random import randint
 import re
 import sys
-from tempfile import NamedTemporaryFile
+
+try:
+    FileNotFoundError
+except NameError:
+    FileNotFoundError = IOError
 
 from .. import CONDA_PACKAGE_ROOT, CondaError, __version__ as CONDA_VERSION
+from .._vendor.auxlib.compat import Utf8NamedTemporaryFile
 from .._vendor.auxlib.ish import dals
 from ..activate import (CshActivator, FishActivator,
                         PosixActivator, XonshActivator, PowerShellActivator)
 from ..base.context import context
-from ..common.compat import (PY2, ensure_binary, ensure_fs_path_encoding, ensure_text_type, on_mac,
-                             on_win, open)
+from ..common.compat import (PY2, ensure_binary, ensure_utf8_encoding,
+                             ensure_text_type, on_mac, on_win, open)
 from ..common.path import (expand, get_bin_directory_short_path, get_python_short_path,
                            get_python_site_packages_short_path, win_path_ok)
 from ..exceptions import CondaValueError
@@ -75,6 +80,11 @@ CONDA_INITIALIZE_RE_BLOCK = (
     r"^# >>> conda initialize >>>(?:\n|\r\n)"
     r"([\s\S]*?)"
     r"# <<< conda initialize <<<(?:\n|\r\n)?")
+
+CONDA_INITIALIZE_PS_RE_BLOCK = (
+    r"^#region conda initialize(?:\n|\r\n)"
+    r"([\s\S]*?)"
+    r"#endregion(?:\n|\r\n)?")
 
 class Result:
     NEEDS_SUDO = "needs sudo"
@@ -174,11 +184,12 @@ def initialize_dev(shell, dev_env_prefix=None, conda_source_root=None):
     unset_env_vars = (
         'CONDA_DEFAULT_ENV',
         'CONDA_EXE',
+        '_CE_M',
+        '_CE_CONDA',
         'CONDA_PREFIX',
         'CONDA_PREFIX_1',
         'CONDA_PREFIX_2',
         'CONDA_PROMPT_MODIFIER',
-        'CONDA_PYTHON_EXE',
         'CONDA_SHLVL',
     )
 
@@ -195,16 +206,20 @@ def initialize_dev(shell, dev_env_prefix=None, conda_source_root=None):
         ]
         print("\n".join(builder))
     elif shell == 'cmd.exe':
+        if context.dev:
+            dev_arg = '--dev'
+        else:
+            dev_arg = ''
         builder = []
         builder += ["@IF NOT \"%CONDA_PROMPT_MODIFIER%\" == \"\" @CALL "
                     "SET \"PROMPT=%%PROMPT:%CONDA_PROMPT_MODIFIER%=%_empty_not_set_%%%\""]
         builder += ["@SET %s=" % unset_env_var for unset_env_var in unset_env_vars]
         builder += ['@SET "%s=%s"' % (key, env_vars[key]) for key in sorted(env_vars)]
         builder += [
-            '@CALL \"%s\"' % join(dev_env_prefix, 'condabin', 'conda_hook.bat'),
+            '@CALL \"%s\" %s' % (join(dev_env_prefix, 'condabin', 'conda_hook.bat'), dev_arg),
             '@IF %errorlevel% NEQ 0 @EXIT /B %errorlevel%',
-            '@CALL \"%s\" activate \"%s\"' % (join(dev_env_prefix, 'condabin', 'conda.bat'),
-                                              dev_env_prefix),
+            '@CALL \"%s\" activate %s \"%s\"' % (join(dev_env_prefix, 'condabin', 'conda.bat'),
+                                                 dev_arg, dev_env_prefix),
             '@IF %errorlevel% NEQ 0 @EXIT /B %errorlevel%',
         ]
         if not context.dry_run:
@@ -421,7 +436,7 @@ def make_initialize_plan(conda_prefix, shells, for_user, for_system, anaconda_pr
     shells = set(shells)
     if shells & {'bash', 'zsh'}:
         if 'bash' in shells and for_user:
-            bashrc_path = expand(join('~', '.bash_profile' if on_mac else '.bashrc'))
+            bashrc_path = expand(join('~', '.bash_profile' if (on_mac or on_win) else '.bashrc'))
             plan.append({
                 'function': init_sh_user.__name__,
                 'kwargs': {
@@ -621,9 +636,9 @@ def run_plan_elevated(plan):
             from ..common.os.windows import run_as_admin
             temp_path = None
             try:
-                with NamedTemporaryFile('w+b', suffix='.json', delete=False) as tf:
+                with Utf8NamedTemporaryFile('w+', suffix='.json', delete=False) as tf:
                     # the default mode is 'w+b', and universal new lines don't work in that mode
-                    tf.write(ensure_binary(json.dumps(plan, ensure_ascii=False)))
+                    tf.write(json.dumps(plan, ensure_ascii=False, default=lambda x: x.__dict__))
                     temp_path = tf.name
                 python_exe = '"%s"' % abspath(sys.executable)
                 hinstance, error_code = run_as_admin((python_exe, '-m',  'conda.core.initialize',
@@ -640,7 +655,7 @@ def run_plan_elevated(plan):
                     rm_rf(temp_path)
 
         else:
-            stdin = json.dumps(plan)
+            stdin = json.dumps(plan, ensure_ascii=False, default=lambda x: x.__dict__)
             result = subprocess_call(
                 'sudo %s -m conda.core.initialize' % sys.executable,
                 env={},
@@ -969,8 +984,13 @@ def init_fish_user(target_path, conda_prefix, reverse):
     # target_path: ~/.config/config.fish
     user_rc_path = target_path
 
-    with open(user_rc_path) as fh:
-        rc_content = fh.read()
+    try:
+        with open(user_rc_path) as fh:
+            rc_content = fh.read()
+    except FileNotFoundError:
+        rc_content = ''
+    except:
+        raise
 
     rc_original_content = rc_content
 
@@ -1035,6 +1055,9 @@ def init_fish_user(target_path, conda_prefix, reverse):
             print(target_path)
             print(make_diff(rc_original_content, rc_content))
         if not context.dry_run:
+            # Make the directory if needed.
+            if not exists(dirname(user_rc_path)):
+                mkdir_p(dirname(user_rc_path))
             with open(user_rc_path, 'w') as fh:
                 fh.write(rc_content)
         return Result.MODIFIED
@@ -1085,8 +1108,13 @@ def init_sh_user(target_path, conda_prefix, shell, reverse=False):
     # target_path: ~/.bash_profile
     user_rc_path = target_path
 
-    with open(user_rc_path) as fh:
-        rc_content = fh.read()
+    try:
+        with open(user_rc_path) as fh:
+            rc_content = fh.read()
+    except FileNotFoundError:
+        rc_content = ''
+    except:
+        raise
 
     rc_original_content = rc_content
 
@@ -1348,7 +1376,7 @@ def init_powershell_user(target_path, conda_prefix, reverse):
     # TODO: comment out old ipmos and Import-Modules.
 
     if reverse:
-        profile_content = re.sub(r"\s*\#region conda initialize.*\#endregion",
+        profile_content = re.sub(CONDA_INITIALIZE_PS_RE_BLOCK,
                                  "",
                                  profile_content,
                                  count=1,
@@ -1361,7 +1389,7 @@ def init_powershell_user(target_path, conda_prefix, reverse):
         if "#region conda initialize" not in profile_content:
             profile_content += "\n{}\n".format(conda_initialize_content)
         else:
-            profile_content = re.sub(r"\#region conda initialize.*\#endregion",
+            profile_content = re.sub(CONDA_INITIALIZE_PS_RE_BLOCK,
                                      "__CONDA_REPLACE_ME_123__",
                                      profile_content,
                                      count=1,
@@ -1422,7 +1450,7 @@ def make_conda_egg_link(target_path, conda_source_root):
     conda_egg_link_contents = conda_source_root + os.linesep
 
     if isfile(target_path):
-        with open(target_path) as fh:
+        with open(target_path, 'rb') as fh:
             conda_egg_link_contents_old = fh.read()
     else:
         conda_egg_link_contents_old = ""
@@ -1433,8 +1461,8 @@ def make_conda_egg_link(target_path, conda_source_root):
             print(target_path, file=sys.stderr)
             print(make_diff(conda_egg_link_contents_old, conda_egg_link_contents), file=sys.stderr)
         if not context.dry_run:
-            with open(target_path, 'w') as fh:
-                fh.write(ensure_fs_path_encoding(conda_egg_link_contents))
+            with open(target_path, 'wb') as fh:
+                fh.write(ensure_utf8_encoding(conda_egg_link_contents))
         return Result.MODIFIED
     else:
         return Result.NO_CHANGE
@@ -1456,15 +1484,16 @@ def modify_easy_install_pth(target_path, conda_source_root):
 
     ln_end = os.sep + "conda"
     old_contents_lines = tuple(ln for ln in old_contents_lines if not ln.endswith(ln_end))
-    new_contents = easy_install_new_line + '\n' + '\n'.join(old_contents_lines) + '\n'
+    new_contents = (easy_install_new_line + os.linesep +
+                    os.linesep.join(old_contents_lines) + os.linesep)
 
     if context.verbosity:
         print('\n', file=sys.stderr)
         print(target_path, file=sys.stderr)
         print(make_diff(old_contents, new_contents), file=sys.stderr)
     if not context.dry_run:
-        with open(target_path, 'w') as fh:
-            fh.write(ensure_fs_path_encoding(new_contents))
+        with open(target_path, 'wb') as fh:
+            fh.write(ensure_utf8_encoding(new_contents))
     return Result.MODIFIED
 
 
