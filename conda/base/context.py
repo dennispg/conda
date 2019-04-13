@@ -27,7 +27,7 @@ from .._vendor.toolz import concat, concatv, unique
 from ..common.compat import NoneType, iteritems, itervalues, odict, on_win, string_types
 from ..common.configuration import (Configuration, ConfigurationLoadError, MapParameter,
                                     PrimitiveParameter, SequenceParameter, ValidationError)
-from ..common.os.linux import linux_get_libc_version
+from ..common._os.linux import linux_get_libc_version
 from ..common.path import expand, paths_equal
 from ..common.url import has_scheme, path_to_url, split_scheme_auth_token
 
@@ -502,7 +502,8 @@ class Context(Configuration):
                                 ('PYTHONPATH', os.path.dirname(CONDA_PACKAGE_ROOT) + '{}{}'.format(
                                     os.pathsep, os.environ.get('PYTHONPATH', ''))),
                                 ('_CE_M', '-m'),
-                                ('_CE_CONDA', 'conda')])
+                                ('_CE_CONDA', 'conda'),
+                                ('CONDA_PYTHON_EXE', sys.executable)])
         else:
             bin_dir = 'Scripts' if on_win else 'bin'
             exe = 'conda.exe' if on_win else 'conda'
@@ -510,7 +511,8 @@ class Context(Configuration):
             # error-on-undefined.
             return OrderedDict([('CONDA_EXE', os.path.join(sys.prefix, bin_dir, exe)),
                                 ('_CE_M', ''),
-                                ('_CE_CONDA', '')])
+                                ('_CE_CONDA', ''),
+                                ('CONDA_PYTHON_EXE', sys.executable)])
 
     @memoizedproperty
     def channel_alias(self):
